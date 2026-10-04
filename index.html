@@ -203,6 +203,35 @@
     font-size: 12px;
     line-height: 1.4;
   }
+  .source {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+    margin-top: 12px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .source button {
+    border: 1px solid var(--line);
+    background: var(--chip);
+    border-radius: 999px;
+    padding: 7px 11px;
+    cursor: pointer;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 13px;
+  }
+  .source button[aria-pressed="true"] {
+    background: var(--accent);
+    color: #1a140e;
+    border-color: transparent;
+    font-weight: 650;
+  }
+  a.ol {
+    color: var(--accent-2);
+    text-decoration: none;
+  }
 </style>
 </head>
 <body>
@@ -228,6 +257,10 @@
         </div>
       </div>
       <div class="chips" id="genreChips" aria-label="Genre shortcuts"></div>
+      <div class="source">
+        <span id="sourceNote">Tagged shelf only. POV is known.</span>
+        <button type="button" id="catalog" aria-pressed="false">Search published books</button>
+      </div>
     </section>
 
     <div class="meta-bar">
@@ -235,7 +268,7 @@
       <button class="linkish" id="reset" type="button">Clear filters</button>
     </div>
     <div class="grid" id="list"></div>
-    <footer>Sample shelf for browsing structure. POV labels describe the dominant narrative stance, which can shift inside a book.</footer>
+    <footer>Open Library supplies published titles and rough subjects. It does not record narrative point of view, so those results stay untagged unless they match the Shelf list.</footer>
   </div>
 <script>
 const BOOKS = [
@@ -300,6 +333,34 @@ genres.slice(1).forEach(g => {
   chips.appendChild(b);
 });
 
+const GENRE_RULES = [
+  ["Horror", /horror|ghost|gothic/i],
+  ["Mystery", /mystery|detective|crime|thriller/i],
+  ["Romance", /romance|love stories/i],
+  ["Science fiction", /science fiction|sci-fi|sf\b/i],
+  ["Fantasy", /fantasy|myth/i],
+  ["Historical", /historical/i],
+  ["Literary", /literary/i]
+];
+const HUES = ["#e7a15a", "#8fb9a8", "#8f7aa3", "#c4554a", "#7f93a8", "#c4a15a", "#6f8f72", "#d98b6a"];
+let catalogOn = false;
+let remote = [];
+let remoteState = "";
+let timer = 0;
+
+function norm(s) { return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+function hueFor(title) { return HUES[[...title].reduce((n, c) => n + c.charCodeAt(0), 0) % HUES.length]; }
+function guessGenre(subjects) {
+  const text = (subjects || []).join(" ");
+  for (const [name, re] of GENRE_RULES) if (re.test(text)) return name;
+  return "General";
+}
+function curatedMatch(title, author) {
+  const t = norm(title);
+  const a = norm(author);
+  return BOOKS.find(b => norm(b.title) === t && (!a || norm(b.author).includes(a.split(" ")[0])));
+}
+
 function matches(book) {
   const query = q.value.trim().toLowerCase();
   const gOk = genre.value === "All genres" || book.genre === genre.value;
@@ -309,31 +370,83 @@ function matches(book) {
   return gOk && pOk && qOk;
 }
 
-function render() {
-  [...chips.children].forEach(chip => {
-    chip.setAttribute("aria-pressed", String(chip.textContent === genre.value));
-  });
-  const shown = BOOKS.filter(matches);
-  count.textContent = shown.length === 1 ? "1 book" : `${shown.length} books`;
-  if (!shown.length) {
-    list.innerHTML = `<div class="empty">Nothing on this shelf matches. Try another POV or clear the search.</div>`;
-    return;
-  }
-  list.innerHTML = shown.map(b => `
+function card(b) {
+  const link = b.href ? `<a class="ol" href="${b.href}" target="_blank" rel="noopener">Open Library</a>` : "";
+  return `
     <article class="book">
-      <div class="spine" style="background:${b.hue}">${b.genre.split(" ")[0]}</div>
+      <div class="spine" style="background:${b.hue}">${(b.genre || "Book").split(" ")[0]}</div>
       <div>
         <h2>${b.title}</h2>
-        <p class="author">${b.author}</p>
+        <p class="author">${b.author}${b.year ? " · " + b.year : ""}</p>
         <div class="tags">
           <span class="tag">${b.genre}</span>
           <span class="tag pov">${b.pov}</span>
         </div>
-        <p class="blurb">${b.note}</p>
+        <p class="blurb">${b.note}${link ? " " + link : ""}</p>
       </div>
-    </article>
-  `).join("");
+    </article>`;
 }
+
+function render() {
+  [...chips.children].forEach(chip => {
+    chip.setAttribute("aria-pressed", String(chip.textContent === genre.value));
+  });
+  const local = BOOKS.filter(matches);
+  const extra = catalogOn ? remote.filter(matches) : [];
+  const shown = catalogOn && q.value.trim().length >= 2 ? extra : local;
+  const label = shown.length === 1 ? "1 book" : `${shown.length} books`;
+  count.textContent = remoteState && catalogOn ? `${label} · ${remoteState}` : label;
+  if (!shown.length) {
+    list.innerHTML = `<div class="empty">${catalogOn && q.value.trim().length < 2 ? "Type a title or author to search published books." : "Nothing matches. POV is only known for the tagged shelf, so a specific point of view hides untagged results."}</div>`;
+    return;
+  }
+  list.innerHTML = shown.map(card).join("");
+}
+
+async function searchCatalog() {
+  const query = q.value.trim();
+  if (!catalogOn || query.length < 2) {
+    remote = [];
+    remoteState = "";
+    render();
+    return;
+  }
+  remoteState = "searching Open Library…";
+  render();
+  try {
+    const url = `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=20&fields=title,author_name,subject,first_publish_year,key`;
+    const data = await fetch(url).then(r => r.json());
+    remote = (data.docs || []).map(doc => {
+      const author = (doc.author_name || [])[0] || "Unknown author";
+      const known = curatedMatch(doc.title, author);
+      return known ? { ...known, year: doc.first_publish_year, href: doc.key ? `https://openlibrary.org${doc.key}` : "" } : {
+        title: doc.title,
+        author,
+        year: doc.first_publish_year,
+        genre: guessGenre(doc.subject),
+        pov: "Not tagged",
+        note: "Published record. Point of view is not in the catalog.",
+        hue: hueFor(doc.title || ""),
+        href: doc.key ? `https://openlibrary.org${doc.key}` : ""
+      };
+    });
+    remoteState = `${data.numFound ? data.numFound.toLocaleString() : remote.length} in Open Library`;
+  } catch (e) {
+    remote = [];
+    remoteState = "Open Library did not respond";
+  }
+  render();
+}
+
+const catalogBtn = document.getElementById("catalog");
+const sourceNote = document.getElementById("sourceNote");
+catalogBtn.addEventListener("click", () => {
+  catalogOn = !catalogOn;
+  catalogBtn.setAttribute("aria-pressed", String(catalogOn));
+  catalogBtn.textContent = catalogOn ? "Tagged shelf" : "Search published books";
+  sourceNote.textContent = catalogOn ? "Open Library, plus Shelf POV when the title matches." : "Tagged shelf only. POV is known.";
+  searchCatalog();
+});
 
 const themeBtn = document.getElementById("theme");
 function applyTheme(theme) {
@@ -348,13 +461,18 @@ themeBtn.addEventListener("click", () => {
   applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
 });
 
-q.addEventListener("input", render);
+q.addEventListener("input", () => {
+  clearTimeout(timer);
+  timer = setTimeout(() => catalogOn ? searchCatalog() : render(), 280);
+});
 genre.addEventListener("change", render);
 pov.addEventListener("change", render);
 document.getElementById("reset").addEventListener("click", () => {
   q.value = "";
   genre.value = "All genres";
   pov.value = "Any POV";
+  remote = [];
+  remoteState = "";
   render();
 });
 render();
