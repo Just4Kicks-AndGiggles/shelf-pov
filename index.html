@@ -228,10 +228,41 @@
     border-color: transparent;
     font-weight: 650;
   }
-  a.ol {
+  a.ol, button.suggest {
     color: var(--accent-2);
     text-decoration: none;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 13px;
   }
+  .suggest-box {
+    margin-top: 8px;
+    display: grid;
+    gap: 8px;
+  }
+  .suggest-box select, .suggest-box input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 8px 10px;
+  }
+  .suggest-box .send {
+    justify-self: start;
+    border: 0;
+    background: var(--accent);
+    color: #1a140e;
+    border-radius: 999px;
+    padding: 7px 12px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 13px;
+    font-weight: 650;
+    cursor: pointer;
+  }
+  .sent { color: var(--accent-2); font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -268,7 +299,15 @@
       <button class="linkish" id="reset" type="button">Clear filters</button>
     </div>
     <div class="grid" id="list"></div>
-    <footer>Open Library supplies published titles and rough subjects. It does not record narrative point of view, so those results stay untagged unless they match the Shelf list.</footer>
+    <footer>Open Library supplies published titles and rough subjects. It does not record narrative point of view. A suggestion is saved for review; it does not change the public tag until it is checked.</footer>
+    <form name="pov-suggestion" method="POST" data-netlify="true" netlify-honeypot="bot-field" hidden>
+      <input name="bot-field" />
+      <input name="title" />
+      <input name="author" />
+      <input name="current" />
+      <input name="suggested" />
+      <input name="note" />
+    </form>
   </div>
 <script>
 const BOOKS = [
@@ -400,19 +439,24 @@ function matches(book) {
   return gOk && pOk && qOk;
 }
 
-function card(b) {
-  const link = b.href ? `<a class="ol" href="${b.href}" target="_blank" rel="noopener">Open Library</a>` : "";
+function esc(s) {
+  return String(s || "").replace(/[&<>"']/g, c => ({ "&": "&", "<": "<", ">": ">", '"': """, "'": "&#39;" }[c]));
+}
+const SUGGEST = ["First person", "Third limited", "Third omniscient", "Second person", "Multiple"];
+function card(b, i) {
+  const link = b.href ? `<a class="ol" href="${esc(b.href)}" target="_blank" rel="noopener">Open Library</a>` : "";
   return `
     <article class="book">
-      <div class="spine" style="background:${b.hue}">${(b.genre || "Book").split(" ")[0]}</div>
+      <div class="spine" style="background:${b.hue}">${esc((b.genre || "Book").split(" ")[0])}</div>
       <div>
-        <h2>${b.title}</h2>
-        <p class="author">${b.author}${b.year ? " · " + b.year : ""}</p>
+        <h2>${esc(b.title)}</h2>
+        <p class="author">${esc(b.author)}${b.year ? " · " + esc(b.year) : ""}</p>
         <div class="tags">
-          <span class="tag">${b.genre}</span>
-          <span class="tag pov">${b.pov}</span>
+          <span class="tag">${esc(b.genre)}</span>
+          <span class="tag pov">${esc(b.pov)}</span>
         </div>
-        <p class="blurb">${b.note}${link ? " " + link : ""}</p>
+        <p class="blurb">${esc(b.note)}${link ? " " + link : ""}</p>
+        <button class="suggest" type="button" data-suggest="${i}">Suggest a POV</button>
       </div>
     </article>`;
 }
@@ -430,7 +474,42 @@ function render() {
     list.innerHTML = `<div class="empty">${catalogOn && q.value.trim().length < 2 ? "Type a title or author to search published books." : "Nothing matches. POV is only known for the tagged shelf, so a specific point of view hides untagged results."}</div>`;
     return;
   }
-  list.innerHTML = shown.map(card).join("");
+  list.innerHTML = shown.map((b, i) => card(b, i)).join("");
+  list.querySelectorAll("[data-suggest]").forEach(btn => {
+    btn.addEventListener("click", () => openSuggest(btn, shown[Number(btn.dataset.suggest)]));
+  });
+}
+
+function openSuggest(btn, book) {
+  const box = document.createElement("form");
+  box.className = "suggest-box";
+  box.innerHTML = `
+    <select name="suggested" aria-label="Suggested point of view" required>
+      ${SUGGEST.map(p => `<option${p === book.pov ? " selected" : ""}>${p}</option>`).join("")}
+    </select>
+    <input name="note" placeholder="Optional: why this tag" maxlength="240" />
+    <button class="send" type="submit">Send suggestion</button>`;
+  btn.replaceWith(box);
+  box.addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const suggested = box.suggested.value;
+    const note = box.note.value.trim();
+    const body = new URLSearchParams({
+      "form-name": "pov-suggestion",
+      title: book.title,
+      author: book.author,
+      current: book.pov,
+      suggested,
+      note
+    });
+    box.querySelector(".send").disabled = true;
+    try {
+      const res = await fetch("/", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+      box.innerHTML = `<p class="sent">${res.ok ? "Suggestion sent for review." : "Could not send. Try again later."}</p>`;
+    } catch (e) {
+      box.innerHTML = `<p class="sent">Could not send. Try again later.</p>`;
+    }
+  });
 }
 
 async function searchCatalog() {
