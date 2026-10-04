@@ -188,6 +188,26 @@
     color: var(--ink);
   }
   .tag.pov { background: var(--tag-pov); color: var(--accent-2); }
+  .tag.community { background: #3a3024; color: #e7a15a; }
+  html[data-theme="light"] .tag.community { background: #f3e4cf; color: #8a4e12; }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: 10px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .tip {
+    flex-basis: 100%;
+    margin: 2px 0 0;
+    color: var(--muted);
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 12px;
+    line-height: 1.35;
+  }
   p.blurb { margin: 0; color: var(--blurb); font-size: 14.5px; line-height: 1.4; }
   .empty {
     border: 1px dashed var(--line);
@@ -289,8 +309,9 @@
       </div>
       <div class="chips" id="genreChips" aria-label="Genre shortcuts"></div>
       <div class="legend" aria-label="Tag sources">
-        <span class="tag pov">Verified</span> checked by the shelf
-        <span class="tag community">Community</span> reader suggestion, not checked
+        <span class="tag pov" title="Checked for this shelf from the book or a published description." tabindex="0">Verified</span> checked by the shelf
+        <span class="tag community" title="A reader suggested this. Not checked against the book." tabindex="0">Community</span> reader suggestion, not checked
+        <span class="tag" title="No point of view on file yet." tabindex="0">Not tagged</span> no claim yet
       </div>
       <div class="source">
         <span id="sourceNote">Tagged shelf only. POV is known.</span>
@@ -447,18 +468,18 @@ function esc(s) {
   return String(s || "").replace(/[&<>"']/g, c => ({ "&": "&", "<": "<", ">": ">", '"': """, "'": "&#39;" }[c]));
 }
 const SUGGEST = ["First person", "Third limited", "Third omniscient", "Second person", "Multiple"];
-function tagClass(book) {
-  if (book.source === "community" || /reader suggested/i.test(book.note || "")) return "tag community";
-  if (book.pov === "Not tagged") return "tag";
-  return "tag pov";
-}
-function tagLabel(book) {
-  if (book.source === "community" || /reader suggested/i.test(book.note || "")) return `${book.pov} · community`;
-  if (book.pov === "Not tagged") return "Not tagged";
-  return `${book.pov} · verified`;
+function tagMeta(book) {
+  if (book.source === "community" || /reader suggested/i.test(book.note || "")) {
+    return { cls: "tag community", label: `${book.pov} · community`, tip: "Community tag. A reader suggested this point of view. It has not been checked against the book." };
+  }
+  if (book.pov === "Not tagged") {
+    return { cls: "tag", label: "Not tagged", tip: "No point of view on file. Suggest one if you know the narration." };
+  }
+  return { cls: "tag pov", label: `${book.pov} · verified`, tip: "Verified tag. Checked for this shelf from the book or a published description, not from the suggestion form." };
 }
 function card(b, i) {
   const link = b.href ? `<a class="ol" href="${esc(b.href)}" target="_blank" rel="noopener">Open Library</a>` : "";
+  const pov = tagMeta(b);
   return `
     <article class="book">
       <div class="spine" style="background:${b.hue}">${esc((b.genre || "Book").split(" ")[0])}</div>
@@ -466,8 +487,8 @@ function card(b, i) {
         <h2>${esc(b.title)}</h2>
         <p class="author">${esc(b.author)}${b.year ? " · " + esc(b.year) : ""}</p>
         <div class="tags">
-          <span class="tag">${esc(b.genre)}</span>
-          <span class="${tagClass(b)}">${esc(tagLabel(b))}</span>
+          <span class="tag" title="Genre used for filtering. Open Library subjects are only a rough match.">${esc(b.genre)}</span>
+          <span class="${pov.cls}" title="${esc(pov.tip)}" data-tip="${esc(pov.tip)}" tabindex="0">${esc(pov.label)}</span>
         </div>
         <p class="blurb">${esc(b.note)}${link ? " " + link : ""}</p>
         <button class="suggest" type="button" data-suggest="${i}">Suggest a POV</button>
@@ -489,6 +510,19 @@ function render() {
     return;
   }
   list.innerHTML = shown.map((b, i) => card(b, i)).join("");
+  list.querySelectorAll("[data-tip]").forEach(tag => {
+    tag.addEventListener("click", () => {
+      const next = tag.nextElementSibling;
+      if (next && next.classList.contains("tip")) {
+        next.remove();
+        return;
+      }
+      const tip = document.createElement("p");
+      tip.className = "tip";
+      tip.textContent = tag.dataset.tip;
+      tag.insertAdjacentElement("afterend", tip);
+    });
+  });
   list.querySelectorAll("[data-suggest]").forEach(btn => {
     btn.addEventListener("click", () => openSuggest(btn, shown[Number(btn.dataset.suggest)]));
   });
