@@ -288,6 +288,10 @@
         </div>
       </div>
       <div class="chips" id="genreChips" aria-label="Genre shortcuts"></div>
+      <div class="legend" aria-label="Tag sources">
+        <span class="tag pov">Verified</span> checked by the shelf
+        <span class="tag community">Community</span> reader suggestion, not checked
+      </div>
       <div class="source">
         <span id="sourceNote">Tagged shelf only. POV is known.</span>
         <button type="button" id="catalog" aria-pressed="false">Search published books</button>
@@ -443,6 +447,16 @@ function esc(s) {
   return String(s || "").replace(/[&<>"']/g, c => ({ "&": "&", "<": "<", ">": ">", '"': """, "'": "&#39;" }[c]));
 }
 const SUGGEST = ["First person", "Third limited", "Third omniscient", "Second person", "Multiple"];
+function tagClass(book) {
+  if (book.source === "community" || /reader suggested/i.test(book.note || "")) return "tag community";
+  if (book.pov === "Not tagged") return "tag";
+  return "tag pov";
+}
+function tagLabel(book) {
+  if (book.source === "community" || /reader suggested/i.test(book.note || "")) return `${book.pov} · community`;
+  if (book.pov === "Not tagged") return "Not tagged";
+  return `${book.pov} · verified`;
+}
 function card(b, i) {
   const link = b.href ? `<a class="ol" href="${esc(b.href)}" target="_blank" rel="noopener">Open Library</a>` : "";
   return `
@@ -453,7 +467,7 @@ function card(b, i) {
         <p class="author">${esc(b.author)}${b.year ? " · " + esc(b.year) : ""}</p>
         <div class="tags">
           <span class="tag">${esc(b.genre)}</span>
-          <span class="tag pov">${esc(b.pov)}</span>
+          <span class="${tagClass(b)}">${esc(tagLabel(b))}</span>
         </div>
         <p class="blurb">${esc(b.note)}${link ? " " + link : ""}</p>
         <button class="suggest" type="button" data-suggest="${i}">Suggest a POV</button>
